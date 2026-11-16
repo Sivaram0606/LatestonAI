@@ -1,0 +1,23 @@
+# Explicit .gcloudignore so pre-built frontend/dist is uploaded to Cloud Build
+# while excluding local virtualenvs, node_modules, secrets, and caches.
+.git/
+.gitignore
+.venv/
+.venv*/
+env/
+venv/
+__pycache__/
+*.py[cod]
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ty/
+.adk/
+.env
+uv.lock
+*.pem
+*-key.json
+credentials*.json
+frontend/node_modules/
+tests/

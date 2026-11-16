@@ -1,0 +1,26 @@
+{
+  "eval_cases": [
+    {
+      "eval_case_id": "daily_briefing_specific_date",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "Generate the daily AI intelligence briefing for target_date=2025-02-14 across research papers, models, news, and repos."
+          }
+        ]
+      }
+    },
+    {
+      "eval_case_id": "daily_briefing_today",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "Pull today's popular AI APIs and summarize the day's top AI papers, Hugging Face models/Spaces, news, and GitHub repositories."
+          }
+        ]
+      }
+    }
+  ]
+}
