@@ -799,3 +799,57 @@ a {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent), var(--shadow-hover);
 }
+
+/* Weekly Sunday-Saturday Selector & Preset Week Buttons */
+.week-range-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  padding: 0.36rem 0.68rem;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.week-presets-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  border-radius: 9px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+}
+
+.week-preset-btn {
+  padding: 0.34rem 0.64rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.week-preset-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-surface);
+}
+
+.week-preset-btn.active {
+  background: var(--accent);
+  color: #ffffff;
+  border-color: var(--accent);
+}
+
+.week-preset-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

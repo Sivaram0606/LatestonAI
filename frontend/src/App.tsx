@@ -41,34 +41,71 @@ function formatReadableDate(isoDate: string): string {
   }).format(dt);
 }
 
-function computeSundaySaturdayHeading(isoDate: string): string {
-  const parts = isoDate.split("-").map(Number);
-  if (parts.length !== 3 || parts.some(Number.isNaN)) {
-    return `Weekly AI Summary (${isoDate})`;
-  }
-  const dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
-  const dayOfWeek = dt.getUTCDay(); // 0 = Sunday .. 6 = Saturday
-  const sun = new Date(
-    Date.UTC(parts[0], parts[1] - 1, parts[2] - dayOfWeek)
-  );
-  const sat = new Date(
-    Date.UTC(parts[0], parts[1] - 1, parts[2] - dayOfWeek + 6)
-  );
-  const fmt = new Intl.DateTimeFormat("en-US", {
+interface WeekWindowInfo {
+  offset: number;
+  sundayIso: string;
+  saturdayIso: string;
+  queryDateIso: string;
+  rangeLabel: string;
+  fullHeading: string;
+}
+
+function computeWeekWindow(
+  anchorTodayIso: string,
+  weekOffset: number
+): WeekWindowInfo {
+  const parts = anchorTodayIso.split("-").map(Number);
+  const y = parts[0] || 2026;
+  const m = (parts[1] || 1) - 1;
+  const d = parts[2] || 1;
+  const anchorDt = new Date(Date.UTC(y, m, d));
+  const dayOfWeek = anchorDt.getUTCDay(); // 0 = Sunday .. 6 = Saturday
+
+  const sun = new Date(Date.UTC(y, m, d - dayOfWeek + weekOffset * 7));
+  const sat = new Date(Date.UTC(y, m, d - dayOfWeek + weekOffset * 7 + 6));
+  const sundayIso = sun.toISOString().slice(0, 10);
+  const saturdayIso = sat.toISOString().slice(0, 10);
+  const queryDateIso = weekOffset === 0 ? anchorTodayIso : saturdayIso;
+
+  const shortFmt = new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "2-digit",
+    timeZone: "UTC",
+  });
+  const endFmt = new Intl.DateTimeFormat("en-US", {
     weekday: "short",
     month: "short",
     day: "2-digit",
     year: "numeric",
     timeZone: "UTC",
   });
-  return `Weekly AI Summary: ${fmt.format(sun)} – ${fmt.format(sat)}`;
+  const fullFmt = new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+
+  const rangeLabel = `${shortFmt.format(sun)} – ${endFmt.format(sat)}`;
+  const fullHeading = `Weekly AI Summary: ${fullFmt.format(sun)} – ${fullFmt.format(sat)}`;
+  return {
+    offset: weekOffset,
+    sundayIso,
+    saturdayIso,
+    queryDateIso,
+    rangeLabel,
+    fullHeading,
+  };
 }
 
-function shiftIsoDate(isoDate: string, deltaDays: number): string {
-  const parts = isoDate.split("-").map(Number);
-  const dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2] + deltaDays));
-  return dt.toISOString().slice(0, 10);
-}
+const WEEK_PRESETS: ReadonlyArray<{ offset: number; label: string }> = [
+  { offset: 0, label: "This Week" },
+  { offset: -1, label: "Previous Week" },
+  { offset: -2, label: "-2 Weeks" },
+  { offset: -3, label: "-3 Weeks" },
+];
 
 function getTodayUtcIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -79,7 +116,7 @@ const SINGLE_CITE_RE = /^[PMNR]\d+$/;
 
 export function App(): React.ReactElement {
   const [todayUtc, setTodayUtc] = useState<string>(getTodayUtcIso);
-  const [selectedDate, setSelectedDate] = useState<string>(getTodayUtcIso);
+  const [selectedWeekOffset, setSelectedWeekOffset] = useState<number>(0);
   const [digest, setDigest] = useState<DailyBriefingResponse | null>(null);
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -116,7 +153,6 @@ export function App(): React.ReactElement {
         setHealth(h);
         if (h.server_utc_date) {
           setTodayUtc(h.server_utc_date);
-          setSelectedDate(h.server_utc_date);
         }
         setCfgUseVertex(h.auth_mode === "vertex_ai");
         setCfgProject(h.google_cloud_project || "");
@@ -124,6 +160,12 @@ export function App(): React.ReactElement {
       })
       .catch(() => {});
   }, []);
+
+  const activeWeek = useMemo(
+    () => computeWeekWindow(todayUtc, selectedWeekOffset),
+    [todayUtc, selectedWeekOffset]
+  );
+  const selectedDate = activeWeek.queryDateIso;
 
   const loadDigest = useCallback(async (dateStr: string, refresh = false) => {
     setLoading(true);
@@ -349,10 +391,9 @@ export function App(): React.ReactElement {
     );
   }, [digest, q]);
 
-  const canGoNext = selectedDate < todayUtc;
+  const canGoNextWeek = selectedWeekOffset < 0;
   const weeklyHeading =
-    digest?.briefing.weekly_window_heading ||
-    computeSundaySaturdayHeading(digest?.target_date || selectedDate);
+    digest?.briefing.weekly_window_heading || activeWeek.fullHeading;
   const whatsNewBullets = digest?.briefing.whats_new_today ?? [];
 
   return (
@@ -372,52 +413,64 @@ export function App(): React.ReactElement {
           </div>
 
           <div className="controls-bar">
-            <div className="date-cluster">
+            {/* Sunday-to-Saturday Weekly Window Stepper */}
+            <div
+              className="date-cluster"
+              role="group"
+              aria-label="Sunday to Saturday week selector"
+            >
               <button
-                id="btn-prev-date"
+                id="btn-prev-week"
                 type="button"
                 className="btn btn-icon"
                 disabled={loading}
-                onClick={() => setSelectedDate(shiftIsoDate(selectedDate, -1))}
-                title="Previous day"
-                aria-label="Previous day"
+                onClick={() => setSelectedWeekOffset((w) => w - 1)}
+                title="Previous Sunday–Saturday week"
+                aria-label="Previous Sunday–Saturday week"
               >
                 <ChevronLeft size={16} />
               </button>
-              <input
-                id="digest-date-picker"
-                type="date"
-                className="date-input"
-                value={selectedDate}
-                max={todayUtc}
-                disabled={loading}
-                onChange={(e) => {
-                  if (e.target.value) setSelectedDate(e.target.value);
-                }}
-                aria-label="Select briefing date"
-              />
+              <span className="week-range-badge" id="active-week-range">
+                <Calendar size={14} style={{ color: "var(--accent)" }} />
+                {activeWeek.rangeLabel}
+              </span>
               <button
-                id="btn-next-date"
+                id="btn-next-week"
                 type="button"
                 className="btn btn-icon"
-                disabled={loading || !canGoNext}
-                onClick={() => setSelectedDate(shiftIsoDate(selectedDate, 1))}
-                title="Next day"
-                aria-label="Next day"
+                disabled={loading || !canGoNextWeek}
+                onClick={() => setSelectedWeekOffset((w) => Math.min(0, w + 1))}
+                title="Next Sunday–Saturday week"
+                aria-label="Next Sunday–Saturday week"
               >
                 <ChevronRight size={16} />
               </button>
             </div>
 
-            <button
-              id="btn-today-date"
-              type="button"
-              className="btn"
-              disabled={loading || selectedDate === todayUtc}
-              onClick={() => setSelectedDate(todayUtc)}
+            {/* Quick Preset Week Selector: This Week, Previous Week, -2 Weeks, -3 Weeks */}
+            <div
+              className="week-presets-group"
+              role="group"
+              aria-label="Preset weeks"
             >
-              Today
-            </button>
+              {WEEK_PRESETS.map((preset) => {
+                const info = computeWeekWindow(todayUtc, preset.offset);
+                const isActive = selectedWeekOffset === preset.offset;
+                return (
+                  <button
+                    id={`btn-week-${preset.offset === 0 ? "this" : Math.abs(preset.offset)}`}
+                    key={preset.offset}
+                    type="button"
+                    disabled={loading}
+                    className={`week-preset-btn ${isActive ? "active" : ""}`}
+                    onClick={() => setSelectedWeekOffset(preset.offset)}
+                    title={info.rangeLabel}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+            </div>
 
             <button
               id="btn-refresh-digest"
@@ -481,7 +534,7 @@ export function App(): React.ReactElement {
             />
             <div style={{ fontWeight: 600, fontSize: "1.05rem" }}>
               Running ADK Parallel Collector &amp; Synthesizer Agents for{" "}
-              {computeSundaySaturdayHeading(selectedDate)}…
+              {activeWeek.fullHeading}…
             </div>
             <p
               style={{
@@ -604,7 +657,8 @@ export function App(): React.ReactElement {
 
               <div className="hero-meta">
                 <span>
-                  Focus Day: {formatReadableDate(digest.target_date)}
+                  Sun–Sat Window: {activeWeek.sundayIso} →{" "}
+                  {activeWeek.saturdayIso}
                 </span>
                 <span>•</span>
                 <span>Generated {digest.generated_at}</span>
@@ -717,7 +771,9 @@ export function App(): React.ReactElement {
               <div className="whats-new-header">
                 <h2 id="whats-new-heading" className="whats-new-title">
                   <Sparkles size={19} style={{ color: "var(--accent)" }} />
-                  What&apos;s New Today — {formatReadableDate(digest.target_date)}
+                  {selectedWeekOffset === 0
+                    ? `What's New Today — ${formatReadableDate(todayUtc)}`
+                    : `What's New Today · Closing Highlights (${activeWeek.rangeLabel})`}
                 </h2>
                 <span className="badge">
                   Daily Updates · Click [P/M/N/R] to jump to source card

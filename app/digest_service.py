@@ -320,10 +320,19 @@ def build_deterministic_briefing_from_raw(
 def _format_compact_digest_context(
     base: DailyBriefingLLMOutput, target_date: str
 ) -> str:
-    """Format compact cited context distinguishing `target_date` items within the week."""
+    """Format compact cited context distinguishing latest/today items within the Sun-Sat week."""
+    paper_dates = [p.published_date for p in base.papers if p.published_date]
+    news_dates = [n.published_date for n in base.news if n.published_date]
+    latest_paper_day = max(paper_dates) if paper_dates else target_date
+    latest_news_day = max(news_dates) if news_dates else target_date
+
     lines: list[str] = ["=== RESEARCH PAPERS (Section: Papers) ==="]
     for p in base.papers:
-        is_today = " [NEW TODAY]" if p.published_date == target_date else ""
+        is_today = (
+            " [NEW TODAY]"
+            if p.published_date in {target_date, latest_paper_day}
+            else ""
+        )
         lines.append(
             f"[{p.citation_id}] ({p.published_date}){is_today} {p.title} "
             f"({p.source}, {p.upvotes} upvotes) — {p.summary[:220]}"
@@ -337,7 +346,11 @@ def _format_compact_digest_context(
         )
     lines.append("\n=== COMMUNITY NEWS (Section: Community News) ===")
     for n in base.news:
-        is_today = " [NEW TODAY]" if n.published_date == target_date else ""
+        is_today = (
+            " [NEW TODAY]"
+            if n.published_date in {target_date, latest_news_day}
+            else ""
+        )
         lines.append(
             f"[{n.citation_id}] ({n.published_date}){is_today} {n.title} "
             f"({n.source}, {n.points} pts, {n.comments} comments) — {n.summary[:150]}"
