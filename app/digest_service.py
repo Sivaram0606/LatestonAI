@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from collections import Counter
 import datetime
 import logging
 import re
 import time
 import uuid
+from collections import Counter
 from typing import Any
 
 from google.adk.runners import Runner
@@ -244,7 +244,7 @@ def build_deterministic_briefing_from_raw(
 
     week_range_text = f"{week_start.isoformat()} to {week_end.isoformat()}"
     lead_paper = (
-        f"Across the Sunday–Saturday week ({week_range_text}), research momentum is anchored by "
+        f"Across the Sunday-Saturday week ({week_range_text}), research momentum is anchored by "
         f"'{papers[0].title}' ({papers[0].source}"
         + (f", {papers[0].upvotes} upvotes" if papers[0].upvotes else "")
         + f") [{papers[0].citation_id}]"
@@ -292,7 +292,7 @@ def build_deterministic_briefing_from_raw(
         else (news[0].title if news else f"AI Ecosystem Week of {week_start.isoformat()}")
     )
     headline = (
-        f"Week of {week_start.strftime('%b %d')}–{week_end.strftime('%b %d, %Y')} "
+        f"Week of {week_start.strftime('%b %d')}-{week_end.strftime('%b %d, %Y')} "
         f"({target_day}): {headline_subject}"
     )
 
@@ -662,13 +662,13 @@ async def generate_daily_briefing(
         collector_traces = [
             AgentStepTrace(
                 agent_name="papers_research_agent",
-                role="Research Papers Collector (Sun–Sat Week + Daily HF & arXiv)",
+                role="Research Papers Collector (Sun-Sat Week + Daily HF & arXiv)",
                 status="completed",
                 duration_ms=max(hf_ms, arxiv_ms),
                 items_collected=len(base_briefing.papers),
                 detail=(
                     f"Fetched {hf_papers_res.get('count', 0)} HF Papers + "
-                    f"{arxiv_res.get('count', 0)} arXiv preprints across Sun–Sat window."
+                    f"{arxiv_res.get('count', 0)} arXiv preprints across Sun-Sat window."
                 ),
             ),
             AgentStepTrace(
@@ -681,7 +681,7 @@ async def generate_daily_briefing(
             ),
             AgentStepTrace(
                 agent_name="news_repos_agent",
-                role="Ecosystem News & Repos Scout (Sun–Sat + Daily HN & GitHub)",
+                role="Ecosystem News & Repos Scout (Sun-Sat + Daily HN & GitHub)",
                 status="completed",
                 duration_ms=max(hn_ms, gh_ms),
                 items_collected=len(base_briefing.news) + len(base_briefing.repos),
@@ -754,7 +754,7 @@ async def generate_daily_briefing(
                     duration_ms=synth_ms,
                     items_collected=total_items,
                     detail=(
-                        f"Synthesized Sun–Sat weekly + daily bullets with {resolved_model} "
+                        f"Synthesized Sun-Sat weekly + daily bullets with {resolved_model} "
                         f"({verdict.verified_citation_count} citations verified)."
                     ),
                 ),
@@ -797,7 +797,7 @@ async def generate_daily_briefing(
             return response
         except Exception as adk_exc:
             root_exc: BaseException = adk_exc
-            while hasattr(root_exc, "exceptions") and getattr(root_exc, "exceptions"):
+            while hasattr(root_exc, "exceptions") and root_exc.exceptions:
                 root_exc = root_exc.exceptions[0]
             short_err = pii_redactor.scrub_text(str(root_exc).splitlines()[0][:160])
 

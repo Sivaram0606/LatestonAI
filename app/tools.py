@@ -20,8 +20,8 @@ import uuid
 import xml.etree.ElementTree as ET
 from typing import Any
 
-from google.adk.tools import FunctionTool, ToolContext
 import httpx
+from google.adk.tools import FunctionTool, ToolContext
 from pydantic import ValidationError
 
 from app.observability import trace_span
@@ -94,7 +94,7 @@ def format_weekly_window_heading(
     """Format a human-readable Sunday-to-Saturday weekly window heading."""
     start_lbl = week_start.strftime("Sun, %b %d, %Y")
     end_lbl = week_end.strftime("Sat, %b %d, %Y")
-    return f"Weekly AI Summary: {start_lbl} – {end_lbl}"
+    return f"Weekly AI Summary: {start_lbl} - {end_lbl}"
 
 
 def _effective_query_end(week_end: datetime.date) -> datetime.date:
@@ -206,7 +206,7 @@ async def fetch_hf_daily_papers(target_date: str) -> dict[str, Any]:
                             dated_batches.append((prev_d, r.json()))
                             effective_day = prev_d
                             msg = (
-                                f"New Sunday–Saturday week ({week_window_str}) has no curated HF batch yet; "
+                                f"New Sunday-Saturday week ({week_window_str}) has no curated HF batch yet; "
                                 f"including latest Friday/weekend batch from {prev_d.isoformat()}."
                             )
                             fallback_note = (
@@ -638,7 +638,7 @@ async def fetch_hf_trending_models_and_spaces(target_date: str) -> dict[str, Any
             if is_historical:
                 hist_note = (
                     "Hugging Face Hub trending reflects live Hub momentum; "
-                    "papers, news, and repos are strictly scoped to the selected Sunday–Saturday week."
+                    "papers, news, and repos are strictly scoped to the selected Sunday-Saturday week."
                 )
                 note = f"{note} {hist_note}".strip() if note else hist_note
 
@@ -832,7 +832,7 @@ async def fetch_github_ai_repos(target_date: str) -> dict[str, Any]:
 
     Queries `https://api.github.com/search/repositories` across the Sunday-to-Saturday week
     containing `target_date` (falling back to a 7-day window if Sunday morning has sparse new
-    creations), authenticating via Secret Manager–resolved `GITHUB_TOKEN` when configured.
+    creations), authenticating via Secret Manager-resolved `GITHUB_TOKEN` when configured.
 
     Args:
         target_date: Target UTC date formatted strictly as 'YYYY-MM-DD' (e.g. '2025-02-14')

@@ -301,7 +301,7 @@ class DailyBriefingLLMOutput(BaseModel):
         default="",
         description=(
             "Heading displaying the Sunday-to-Saturday week window as one unified range, "
-            "e.g. 'Weekly AI Summary: Sun, Nov 15, 2026 – Sat, Nov 21, 2026'."
+            "e.g. 'Weekly AI Summary: Sun, Nov 15, 2026 - Sat, Nov 21, 2026'."
         ),
     )
     headline: str = Field(

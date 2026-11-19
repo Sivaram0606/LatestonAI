@@ -48,7 +48,7 @@ class SecretManagerResolver:
         Resolution order:
         1. Explicit Secret Manager resource/ID configured in ``secret_id_env_var``
            (or ``USE_SECRET_MANAGER=true`` + ``default_secret_id``).
-        2. Secret Manager–mounted Cloud Run environment variable ``env_var_name``.
+        2. Secret Manager-mounted Cloud Run environment variable ``env_var_name``.
         3. Empty string if unconfigured (never raises on optional public-API keys).
         """
         secret_id = ""

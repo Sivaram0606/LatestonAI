@@ -153,7 +153,7 @@ def test_weekly_summary_whats_new_bullets_and_section_citations() -> None:
         },
     )
 
-    assert "Sun, Feb 09, 2025 – Sat, Feb 15, 2025" in briefing.weekly_window_heading
+    assert "Sun, Feb 09, 2025 - Sat, Feb 15, 2025" in briefing.weekly_window_heading
     assert len(briefing.papers) == 2
     assert briefing.papers[0].citation_id == "P1"
     assert briefing.papers[1].citation_id == "P2"

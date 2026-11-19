@@ -1,7 +1,7 @@
 """Structured JSON logging, OpenTelemetry distributed tracing, and Intent/Outcome plugin.
 
 Satisfies AgentOps Code Review Matrix — Category 4 (Observability & Tracing):
-- 4.1 Structured JSON Logging: Emits Cloud Logging–compatible JSON records with rich metadata.
+- 4.1 Structured JSON Logging: Emits Cloud Logging-compatible JSON records with rich metadata.
 - 4.2 Intent vs. Outcome Capture: Explicitly logs `phase="INTENT"` before agent/model/tool
       execution and `phase="OUTCOME"` with correlation IDs and latency afterward.
 - 4.3 Distributed Tracing: Configures OpenTelemetry spans linking HTTP -> workflow -> tools -> LLM.
@@ -10,7 +10,6 @@ Satisfies AgentOps Code Review Matrix — Category 4 (Observability & Tracing):
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 import contextlib
 import datetime
 import json
@@ -19,6 +18,7 @@ import os
 import sys
 import time
 import uuid
+from collections.abc import Iterator
 from typing import Any
 
 from google.adk.agents.base_agent import BaseAgent

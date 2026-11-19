@@ -5,9 +5,9 @@ from __future__ import annotations
 import datetime
 import logging
 import os
+import uuid
 from pathlib import Path
 from typing import Literal
-import uuid
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request, Response

@@ -10,9 +10,9 @@ Satisfies AgentOps Code Review Matrix — Category 3 (Strategic Model Routing):
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from enum import StrEnum
-import os
 
 from google.adk.models import Gemini
 from google.genai import types
