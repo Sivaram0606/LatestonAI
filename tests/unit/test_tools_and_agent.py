@@ -1,4 +1,4 @@
-"""Unit tests for date parsing, multi-agent topology, and fallback briefing synthesis."""
+"""Unit tests for Sun-Sat weekly window, daily bullets, citations, and multi-agent topology."""
 
 import datetime
 
@@ -9,11 +9,12 @@ from app.digest_service import (
     _merge_editorial_into_briefing,
     build_deterministic_briefing_from_raw,
 )
+from app.guardrails import evaluate_briefing_self_check
 from app.schemas import EditorialSynthesisLLMOutput
-from app.tools import parse_target_date
+from app.tools import compute_sunday_to_saturday_window, parse_target_date
 
 
-def test_parse_target_date_valid_and_future() -> None:
+def test_parse_target_date_and_sunday_saturday_window() -> None:
     today = datetime.datetime.now(datetime.UTC).date()
     d_today, note_today = parse_target_date("today")
     assert d_today == today
@@ -22,6 +23,23 @@ def test_parse_target_date_valid_and_future() -> None:
     d_past, note_past = parse_target_date("2025-02-14")
     assert d_past == datetime.date(2025, 2, 14)
     assert note_past == ""
+
+    # 2025-02-14 is Friday -> Sunday 2025-02-09 through Saturday 2025-02-15
+    sun, sat = compute_sunday_to_saturday_window(d_past)
+    assert sun == datetime.date(2025, 2, 9)
+    assert sat == datetime.date(2025, 2, 15)
+    assert sun.weekday() == 6  # Sunday
+    assert sat.weekday() == 5  # Saturday
+
+    # Boundary check when target date itself is Sunday or Saturday
+    assert compute_sunday_to_saturday_window(datetime.date(2026, 11, 15)) == (
+        datetime.date(2026, 11, 15),
+        datetime.date(2026, 11, 21),
+    )
+    assert compute_sunday_to_saturday_window(datetime.date(2026, 11, 21)) == (
+        datetime.date(2026, 11, 15),
+        datetime.date(2026, 11, 21),
+    )
 
     future_str = (today + datetime.timedelta(days=10)).isoformat()
     d_future, note_future = parse_target_date(future_str)
@@ -49,7 +67,7 @@ def test_adk_multi_agent_topology() -> None:
     assert MODEL == "gemini-3.7-flash"
 
 
-def test_deterministic_briefing_deduplicates_and_populates_all_sections() -> None:
+def test_weekly_summary_whats_new_bullets_and_section_citations() -> None:
     briefing = build_deterministic_briefing_from_raw(
         target_day="2025-02-14",
         hf_papers_res={
@@ -83,7 +101,7 @@ def test_deterministic_briefing_deduplicates_and_populates_all_sections() -> Non
                     "authors": "Priya Nair",
                     "source": "arXiv",
                     "url": "https://arxiv.org/abs/2502.00002",
-                    "published_date": "2025-02-14",
+                    "published_date": "2025-02-12",
                     "upvotes": 0,
                     "summary": "Reduces KV-cache memory by 4x for vision-language models.",
                     "tags": ["Multimodal", "Efficiency"],
@@ -100,6 +118,7 @@ def test_deterministic_briefing_deduplicates_and_populates_all_sections() -> Non
                     "url": "https://huggingface.co/google/gemma-next-instruct",
                     "likes": 1420,
                     "downloads": 85000,
+                    "last_modified": "2025-02-14",
                     "summary": "Open-weight instruction-tuned model.",
                 }
             ]
@@ -111,6 +130,7 @@ def test_deterministic_briefing_deduplicates_and_populates_all_sections() -> Non
                     "source": "github.com",
                     "url": "https://github.com/example/mcp-sandbox",
                     "discussion_url": "https://news.ycombinator.com/item?id=12345",
+                    "published_date": "2025-02-14",
                     "points": 310,
                     "comments": 94,
                     "summary": "Discussed on Hacker News.",
@@ -123,6 +143,7 @@ def test_deterministic_briefing_deduplicates_and_populates_all_sections() -> Non
                     "full_name": "example/agent-orchestrator",
                     "language": "Python",
                     "url": "https://github.com/example/agent-orchestrator",
+                    "created_date": "2025-02-14",
                     "stars": 940,
                     "forks": 72,
                     "summary": "Lightweight multi-agent workflow engine.",
@@ -132,12 +153,16 @@ def test_deterministic_briefing_deduplicates_and_populates_all_sections() -> Non
         },
     )
 
-    assert len(briefing.papers) == 2  # duplicate title removed
-    assert len(briefing.models) == 1
-    assert len(briefing.news) == 1
-    assert len(briefing.repos) == 1
-    assert len(briefing.key_themes) >= 3
-    assert "2025-02-14" in briefing.headline
+    assert "Sun, Feb 09, 2025 – Sat, Feb 15, 2025" in briefing.weekly_window_heading
+    assert len(briefing.papers) == 2
+    assert briefing.papers[0].citation_id == "P1"
+    assert briefing.papers[1].citation_id == "P2"
+    assert briefing.models[0].citation_id == "M1"
+    assert briefing.news[0].citation_id == "N1"
+    assert briefing.repos[0].citation_id == "R1"
+    assert len(briefing.whats_new_today) >= 4
+    assert "[P1]" in briefing.executive_summary
+    assert any("[P1]" in b for b in briefing.whats_new_today)
 
     fast_agent = create_fast_editorial_agent()
     assert fast_agent.name == "digest_synthesizer_agent"
@@ -145,8 +170,17 @@ def test_deterministic_briefing_deduplicates_and_populates_all_sections() -> Non
     merged = _merge_editorial_into_briefing(
         briefing,
         EditorialSynthesisLLMOutput(
-            headline="Breakthrough Day in Agentic Test-Time Compute",
-            executive_summary="Paragraph one.\n\nParagraph two.",
+            headline="Breakthrough Week in Agentic Test-Time Compute",
+            executive_summary=(
+                "Weekly breakthroughs span parallel verification [P1, P2] and new open weights [M1].\n\n"
+                "Community discussions highlighted MCP sandboxes [N1] and orchestration [R1] [P99]."
+            ),
+            whats_new_today=[
+                "- New test-time compute paper landed today [P1]",
+                "• Gemma-Next instruct checkpoint updated on the Hub [M1]",
+                "Show HN MCP sandbox crossed 300 points today [N1]",
+                "Agent orchestrator repo surged on GitHub [R1]",
+            ],
             key_themes=["Test-time compute", "Sparse attention", "MCP sandboxes"],
             paper_summaries=["Takeaway 1.", "Takeaway 2."],
             model_summaries=["Model takeaway."],
@@ -154,6 +188,12 @@ def test_deterministic_briefing_deduplicates_and_populates_all_sections() -> Non
             repo_summaries=["Repo takeaway."],
         ),
     )
-    assert merged.headline == "Breakthrough Day in Agentic Test-Time Compute"
-    assert merged.papers[0].summary == "Takeaway 1."
-    assert merged.papers[0].url == "https://huggingface.co/papers/2502.00001"
+    assert merged.headline == "Breakthrough Week in Agentic Test-Time Compute"
+    assert "[P1] [P2]" in merged.executive_summary
+    assert "[P99]" not in merged.executive_summary  # dangling citation pruned
+    assert not merged.whats_new_today[0].startswith("-")
+    assert "[P1]" in merged.whats_new_today[0]
+
+    verdict = evaluate_briefing_self_check(merged)
+    assert verdict.passed is True
+    assert verdict.verified_citation_count >= 5

@@ -3,6 +3,7 @@ import {
   Activity,
   BookOpen,
   Bot,
+  Calendar,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -18,6 +19,7 @@ import {
   RefreshCw,
   Search,
   Settings,
+  Sparkles,
   Star,
   Sun,
   ThumbsUp,
@@ -31,11 +33,35 @@ function formatReadableDate(isoDate: string): string {
   if (parts.length !== 3 || parts.some(Number.isNaN)) return isoDate;
   const dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
   return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
     month: "short",
     day: "2-digit",
     year: "numeric",
     timeZone: "UTC",
   }).format(dt);
+}
+
+function computeSundaySaturdayHeading(isoDate: string): string {
+  const parts = isoDate.split("-").map(Number);
+  if (parts.length !== 3 || parts.some(Number.isNaN)) {
+    return `Weekly AI Summary (${isoDate})`;
+  }
+  const dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+  const dayOfWeek = dt.getUTCDay(); // 0 = Sunday .. 6 = Saturday
+  const sun = new Date(
+    Date.UTC(parts[0], parts[1] - 1, parts[2] - dayOfWeek)
+  );
+  const sat = new Date(
+    Date.UTC(parts[0], parts[1] - 1, parts[2] - dayOfWeek + 6)
+  );
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  return `Weekly AI Summary: ${fmt.format(sun)} – ${fmt.format(sat)}`;
 }
 
 function shiftIsoDate(isoDate: string, deltaDays: number): string {
@@ -48,6 +74,9 @@ function getTodayUtcIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+const CITATION_SPLIT_RE = /(\[[PMNR]\d+(?:\s*,\s*[PMNR]\d+)*\])/g;
+const SINGLE_CITE_RE = /^[PMNR]\d+$/;
+
 export function App(): React.ReactElement {
   const [todayUtc, setTodayUtc] = useState<string>(getTodayUtcIso);
   const [selectedDate, setSelectedDate] = useState<string>(getTodayUtcIso);
@@ -58,6 +87,7 @@ export function App(): React.ReactElement {
   const [activeTab, setActiveTab] = useState<SectionTab>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [traceExpanded, setTraceExpanded] = useState<boolean>(true);
+  const [highlightedCite, setHighlightedCite] = useState<string>("");
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     const saved = localStorage.getItem("ai-digest-theme");
     if (saved === "dark" || saved === "light") return saved;
@@ -113,7 +143,7 @@ export function App(): React.ReactElement {
       setError(
         err instanceof Error
           ? err.message
-          : "Failed to pull daily briefing from backend."
+          : "Failed to pull weekly & daily briefing from backend."
       );
     } finally {
       setLoading(false);
@@ -149,47 +179,181 @@ export function App(): React.ReactElement {
     }
   };
 
+  // Map citation IDs (P1, M1, N1, R1) to human-readable tooltips & target sections
+  const citationMeta = useMemo(() => {
+    const map = new Map<
+      string,
+      { label: string; section: SectionTab; sectionDomId: string }
+    >();
+    if (!digest) return map;
+    digest.briefing.papers.forEach((p, i) => {
+      const id = p.citation_id || `P${i + 1}`;
+      map.set(id, {
+        label: `${id} · Research Paper: ${p.title}`,
+        section: "papers",
+        sectionDomId: "section-papers",
+      });
+    });
+    digest.briefing.models.forEach((m, i) => {
+      const id = m.citation_id || `M${i + 1}`;
+      map.set(id, {
+        label: `${id} · ${m.kind}: ${m.name}`,
+        section: "models",
+        sectionDomId: "section-models",
+      });
+    });
+    digest.briefing.news.forEach((n, i) => {
+      const id = n.citation_id || `N${i + 1}`;
+      map.set(id, {
+        label: `${id} · Community News: ${n.title}`,
+        section: "news",
+        sectionDomId: "section-news",
+      });
+    });
+    digest.briefing.repos.forEach((r, i) => {
+      const id = r.citation_id || `R${i + 1}`;
+      map.set(id, {
+        label: `${id} · GitHub Repo: ${r.full_name}`,
+        section: "repos",
+        sectionDomId: "section-repos",
+      });
+    });
+    return map;
+  }, [digest]);
+
+  const jumpToCitation = useCallback(
+    (citeId: string) => {
+      const meta = citationMeta.get(citeId);
+      if (searchQuery) {
+        setSearchQuery("");
+      }
+      if (activeTab !== "all" && meta && activeTab !== meta.section) {
+        setActiveTab("all");
+      }
+      setHighlightedCite(citeId);
+      window.setTimeout(() => {
+        const el =
+          document.getElementById(`cite-${citeId}`) ||
+          (meta ? document.getElementById(meta.sectionDomId) : null);
+        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 40);
+      window.setTimeout(() => {
+        setHighlightedCite((prev) => (prev === citeId ? "" : prev));
+      }, 2800);
+    },
+    [activeTab, citationMeta, searchQuery]
+  );
+
+  const jumpToSection = useCallback(
+    (sectionDomId: string, tab: SectionTab) => {
+      if (activeTab !== "all" && activeTab !== tab) {
+        setActiveTab("all");
+      }
+      window.setTimeout(() => {
+        document
+          .getElementById(sectionDomId)
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 30);
+    },
+    [activeTab]
+  );
+
+  const renderTextWithCitations = useCallback(
+    (text: string): React.ReactNode => {
+      const parts = text.split(CITATION_SPLIT_RE);
+      return parts.map((segment, idx) => {
+        if (segment.startsWith("[") && segment.endsWith("]")) {
+          const inner = segment.slice(1, -1);
+          const ids = inner
+            .split(",")
+            .map((s) => s.trim())
+            .filter((s) => SINGLE_CITE_RE.test(s));
+          if (ids.length > 0) {
+            return (
+              <React.Fragment key={idx}>
+                {ids.map((cid) => {
+                  const meta = citationMeta.get(cid);
+                  return (
+                    <button
+                      key={`${idx}-${cid}`}
+                      type="button"
+                      className="citation-chip"
+                      title={meta?.label || `Jump to ${cid} below`}
+                      onClick={() => jumpToCitation(cid)}
+                    >
+                      [{cid}]
+                    </button>
+                  );
+                })}
+              </React.Fragment>
+            );
+          }
+        }
+        return <React.Fragment key={idx}>{segment}</React.Fragment>;
+      });
+    },
+    [citationMeta, jumpToCitation]
+  );
+
   const q = searchQuery.trim().toLowerCase();
 
   const filteredPapers = useMemo(() => {
-    const list = digest?.briefing.papers ?? [];
+    const list = (digest?.briefing.papers ?? []).map((p, idx) => ({
+      ...p,
+      citation_id: p.citation_id || `P${idx + 1}`,
+    }));
     if (!q) return list;
     return list.filter((p) =>
-      `${p.title} ${p.authors} ${p.summary} ${p.tags.join(" ")}`
+      `${p.citation_id} ${p.title} ${p.authors} ${p.summary} ${p.tags.join(" ")}`
         .toLowerCase()
         .includes(q)
     );
   }, [digest, q]);
 
   const filteredModels = useMemo(() => {
-    const list = digest?.briefing.models ?? [];
+    const list = (digest?.briefing.models ?? []).map((m, idx) => ({
+      ...m,
+      citation_id: m.citation_id || `M${idx + 1}`,
+    }));
     if (!q) return list;
     return list.filter((m) =>
-      `${m.name} ${m.author} ${m.pipeline_tag} ${m.summary}`
+      `${m.citation_id} ${m.name} ${m.author} ${m.pipeline_tag} ${m.summary}`
         .toLowerCase()
         .includes(q)
     );
   }, [digest, q]);
 
   const filteredNews = useMemo(() => {
-    const list = digest?.briefing.news ?? [];
+    const list = (digest?.briefing.news ?? []).map((n, idx) => ({
+      ...n,
+      citation_id: n.citation_id || `N${idx + 1}`,
+    }));
     if (!q) return list;
     return list.filter((n) =>
-      `${n.title} ${n.source} ${n.summary}`.toLowerCase().includes(q)
+      `${n.citation_id} ${n.title} ${n.source} ${n.summary}`
+        .toLowerCase()
+        .includes(q)
     );
   }, [digest, q]);
 
   const filteredRepos = useMemo(() => {
-    const list = digest?.briefing.repos ?? [];
+    const list = (digest?.briefing.repos ?? []).map((r, idx) => ({
+      ...r,
+      citation_id: r.citation_id || `R${idx + 1}`,
+    }));
     if (!q) return list;
     return list.filter((r) =>
-      `${r.full_name} ${r.language} ${r.summary} ${r.topics.join(" ")}`
+      `${r.citation_id} ${r.full_name} ${r.language} ${r.summary} ${r.topics.join(" ")}`
         .toLowerCase()
         .includes(q)
     );
   }, [digest, q]);
 
   const canGoNext = selectedDate < todayUtc;
+  const weeklyHeading =
+    digest?.briefing.weekly_window_heading ||
+    computeSundaySaturdayHeading(digest?.target_date || selectedDate);
+  const whatsNewBullets = digest?.briefing.whats_new_today ?? [];
 
   return (
     <div>
@@ -200,9 +364,9 @@ export function App(): React.ReactElement {
               <Bot size={20} />
             </div>
             <div>
-              <div className="brand-title">AI Daily Digest</div>
+              <div className="brand-title">AI Weekly &amp; Daily Digest</div>
               <div className="brand-subtitle">
-                Google ADK Multi-Agent Briefing
+                Google ADK Multi-Agent Briefing (Sun–Sat Window + Daily Updates)
               </div>
             </div>
           </div>
@@ -317,7 +481,7 @@ export function App(): React.ReactElement {
             />
             <div style={{ fontWeight: 600, fontSize: "1.05rem" }}>
               Running ADK Parallel Collector &amp; Synthesizer Agents for{" "}
-              {formatReadableDate(selectedDate)}…
+              {computeSundaySaturdayHeading(selectedDate)}…
             </div>
             <p
               style={{
@@ -326,8 +490,8 @@ export function App(): React.ReactElement {
                 marginTop: "0.4rem",
               }}
             >
-              Querying Hugging Face Daily Papers &amp; Hub API, arXiv preprints,
-              Hacker News Algolia, and GitHub AI repositories.
+              Querying Sunday–Saturday &amp; daily updates across Hugging Face,
+              arXiv, Hacker News, and GitHub.
             </p>
           </div>
         )}
@@ -373,6 +537,11 @@ export function App(): React.ReactElement {
                       ? `ADK · ${digest.model_used}`
                       : "Live API Parallel Mode"}
                   </span>
+                  {digest.self_eval && (
+                    <span className="badge badge-neutral">
+                      Self-Eval {(digest.self_eval.grounding_score * 100).toFixed(0)}%
+                    </span>
+                  )}
                 </div>
                 {traceExpanded ? (
                   <ChevronUp size={16} />
@@ -388,7 +557,10 @@ export function App(): React.ReactElement {
                       <div className="trace-step-top">
                         <span
                           className="mono-tag"
-                          style={{ fontWeight: 600, color: "var(--text-primary)" }}
+                          style={{
+                            fontWeight: 600,
+                            color: "var(--text-primary)",
+                          }}
                         >
                           <span className="status-dot" /> {step.agent_name}
                         </span>
@@ -410,7 +582,10 @@ export function App(): React.ReactElement {
                       </div>
                       <div
                         className="mono-tag"
-                        style={{ color: "var(--text-muted)", fontSize: "0.72rem" }}
+                        style={{
+                          color: "var(--text-muted)",
+                          fontSize: "0.72rem",
+                        }}
                       >
                         {step.detail} ({step.items_collected} items)
                       </div>
@@ -420,13 +595,17 @@ export function App(): React.ReactElement {
               )}
             </section>
 
-            {/* Executive Summary Hero */}
-            <article className="hero-card">
+            {/* 1. Weekly Summary Hero (Sunday to Saturday Window Heading) */}
+            <article className="hero-card" id="weekly-summary-section">
+              <h2 className="weekly-window-heading">
+                <Calendar size={15} />
+                {weeklyHeading}
+              </h2>
+
               <div className="hero-meta">
-                <span className="badge">
-                  {formatReadableDate(digest.target_date)}
+                <span>
+                  Focus Day: {formatReadableDate(digest.target_date)}
                 </span>
-                <span>ISO {digest.target_date}</span>
                 <span>•</span>
                 <span>Generated {digest.generated_at}</span>
               </div>
@@ -438,12 +617,61 @@ export function App(): React.ReactElement {
                   .split(/\n\s*\n/)
                   .filter(Boolean)
                   .map((para, idx) => (
-                    <p key={idx}>{para}</p>
+                    <p key={idx}>{renderTextWithCitations(para)}</p>
                   ))}
               </div>
 
+              {/* Section Citation Index Jump Bar */}
+              <div
+                className="section-jump-bar"
+                aria-label="Cited sections below"
+              >
+                <span
+                  className="mono-tag"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  Referenced Sections:
+                </span>
+                {digest.briefing.papers.length > 0 && (
+                  <button
+                    type="button"
+                    className="section-jump-pill"
+                    onClick={() => jumpToSection("section-papers", "papers")}
+                  >
+                    Papers [P1–P{digest.briefing.papers.length}]
+                  </button>
+                )}
+                {digest.briefing.models.length > 0 && (
+                  <button
+                    type="button"
+                    className="section-jump-pill"
+                    onClick={() => jumpToSection("section-models", "models")}
+                  >
+                    Models &amp; Spaces [M1–M{digest.briefing.models.length}]
+                  </button>
+                )}
+                {digest.briefing.news.length > 0 && (
+                  <button
+                    type="button"
+                    className="section-jump-pill"
+                    onClick={() => jumpToSection("section-news", "news")}
+                  >
+                    Community News [N1–N{digest.briefing.news.length}]
+                  </button>
+                )}
+                {digest.briefing.repos.length > 0 && (
+                  <button
+                    type="button"
+                    className="section-jump-pill"
+                    onClick={() => jumpToSection("section-repos", "repos")}
+                  >
+                    GitHub Repos [R1–R{digest.briefing.repos.length}]
+                  </button>
+                )}
+              </div>
+
               {digest.briefing.key_themes.length > 0 && (
-                <div className="themes-list" aria-label="Key daily themes">
+                <div className="themes-list" aria-label="Key weekly themes">
                   {digest.briefing.key_themes.map((themeItem, idx) => (
                     <span key={idx} className="theme-chip">
                       {themeItem}
@@ -457,35 +685,65 @@ export function App(): React.ReactElement {
                   <span className="kpi-value">
                     {digest.briefing.papers.length}
                   </span>
-                  <span className="kpi-label">Research Papers</span>
+                  <span className="kpi-label">Research Papers [P]</span>
                 </div>
                 <div className="kpi-box">
                   <span className="kpi-value">
                     {digest.briefing.models.length}
                   </span>
-                  <span className="kpi-label">Trending Models &amp; Spaces</span>
+                  <span className="kpi-label">Models &amp; Spaces [M]</span>
                 </div>
                 <div className="kpi-box">
                   <span className="kpi-value">
                     {digest.briefing.news.length}
                   </span>
-                  <span className="kpi-label">Community Discussions</span>
+                  <span className="kpi-label">Community News [N]</span>
                 </div>
                 <div className="kpi-box">
                   <span className="kpi-value">
                     {digest.briefing.repos.length}
                   </span>
-                  <span className="kpi-label">Breakout GitHub Repos</span>
+                  <span className="kpi-label">Breakout Repos [R]</span>
                 </div>
               </div>
             </article>
+
+            {/* 2. Separate "What's New Today" Bullet-Point Section */}
+            <section
+              id="whats-new-today"
+              className="whats-new-card"
+              aria-labelledby="whats-new-heading"
+            >
+              <div className="whats-new-header">
+                <h2 id="whats-new-heading" className="whats-new-title">
+                  <Sparkles size={19} style={{ color: "var(--accent)" }} />
+                  What&apos;s New Today — {formatReadableDate(digest.target_date)}
+                </h2>
+                <span className="badge">
+                  Daily Updates · Click [P/M/N/R] to jump to source card
+                </span>
+              </div>
+
+              {whatsNewBullets.length === 0 ? (
+                <p style={{ color: "var(--text-muted)", margin: 0 }}>
+                  No standalone daily updates recorded yet for{" "}
+                  {digest.target_date}.
+                </p>
+              ) : (
+                <ul className="whats-new-bullets">
+                  {whatsNewBullets.map((bullet, idx) => (
+                    <li key={idx}>{renderTextWithCitations(bullet)}</li>
+                  ))}
+                </ul>
+              )}
+            </section>
 
             {/* Category Navigation & Search */}
             <div className="toolbar-row relative z-30">
               <div className="tabs-group" role="tablist">
                 {(
                   [
-                    ["all", "All Briefing Sections"],
+                    ["all", "All Referenced Sections"],
                     ["papers", `Papers (${filteredPapers.length})`],
                     ["models", `Models & Spaces (${filteredModels.length})`],
                     ["news", `News (${filteredNews.length})`],
@@ -511,7 +769,7 @@ export function App(): React.ReactElement {
                 <input
                   id="digest-filter-input"
                   type="search"
-                  placeholder="Filter papers, models, news, repos…"
+                  placeholder="Filter papers, models, news, repos, or [P1]…"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   aria-label="Filter briefing items"
@@ -519,16 +777,20 @@ export function App(): React.ReactElement {
               </div>
             </div>
 
-            {/* 1. Research Papers */}
+            {/* Section 1: Research Papers */}
             {(activeTab === "all" || activeTab === "papers") && (
-              <section className="digest-section">
+              <section id="section-papers" className="digest-section">
                 <div className="section-header">
                   <h2 className="section-title">
                     <BookOpen size={19} style={{ color: "var(--accent)" }} />
                     Research Papers
                   </h2>
-                  <span className="mono-tag" style={{ color: "var(--text-muted)" }}>
-                    Hugging Face Daily Papers &amp; arXiv
+                  <span
+                    className="mono-tag"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    Citations [P1–P{digest.briefing.papers.length}] · Hugging
+                    Face &amp; arXiv
                   </span>
                 </div>
 
@@ -538,12 +800,23 @@ export function App(): React.ReactElement {
                   </p>
                 ) : (
                   <div className="cards-grid">
-                    {filteredPapers.map((paper, idx) => (
-                      <article key={`${paper.url}-${idx}`} className="item-card">
+                    {filteredPapers.map((paper) => (
+                      <article
+                        id={`cite-${paper.citation_id}`}
+                        key={`${paper.citation_id}-${paper.url}`}
+                        className={`item-card ${
+                          highlightedCite === paper.citation_id
+                            ? "cited-highlight"
+                            : ""
+                        }`}
+                      >
                         <div>
                           <div className="card-top-meta">
-                            <span>{paper.source}</span>
+                            <span className="card-cite-anchor">
+                              [{paper.citation_id}]
+                            </span>
                             <span>
+                              {paper.source} ·{" "}
                               {formatReadableDate(paper.published_date)}
                             </span>
                           </div>
@@ -566,7 +839,10 @@ export function App(): React.ReactElement {
                               <span className="mini-tag">
                                 <ThumbsUp
                                   size={11}
-                                  style={{ marginRight: 4, verticalAlign: "-1px" }}
+                                  style={{
+                                    marginRight: 4,
+                                    verticalAlign: "-1px",
+                                  }}
                                 />
                                 {paper.upvotes}
                               </span>
@@ -593,16 +869,20 @@ export function App(): React.ReactElement {
               </section>
             )}
 
-            {/* 2. Models & Spaces */}
+            {/* Section 2: Models & Spaces */}
             {(activeTab === "all" || activeTab === "models") && (
-              <section className="digest-section">
+              <section id="section-models" className="digest-section">
                 <div className="section-header">
                   <h2 className="section-title">
                     <Cpu size={19} style={{ color: "var(--accent)" }} />
                     Models &amp; Interactive Spaces
                   </h2>
-                  <span className="mono-tag" style={{ color: "var(--text-muted)" }}>
-                    Hugging Face Hub API
+                  <span
+                    className="mono-tag"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    Citations [M1–M{digest.briefing.models.length}] · Hugging
+                    Face Hub
                   </span>
                 </div>
 
@@ -612,14 +892,24 @@ export function App(): React.ReactElement {
                   </p>
                 ) : (
                   <div className="cards-grid">
-                    {filteredModels.map((model, idx) => (
-                      <article key={`${model.url}-${idx}`} className="item-card">
+                    {filteredModels.map((model) => (
+                      <article
+                        id={`cite-${model.citation_id}`}
+                        key={`${model.citation_id}-${model.url}`}
+                        className={`item-card ${
+                          highlightedCite === model.citation_id
+                            ? "cited-highlight"
+                            : ""
+                        }`}
+                      >
                         <div>
                           <div className="card-top-meta">
-                            <span className="badge badge-neutral">
-                              {model.kind}
+                            <span className="card-cite-anchor">
+                              [{model.citation_id}]
                             </span>
-                            <span>{model.pipeline_tag}</span>
+                            <span>
+                              {model.kind} · {model.pipeline_tag}
+                            </span>
                           </div>
                           <h3
                             className="card-title"
@@ -646,7 +936,10 @@ export function App(): React.ReactElement {
                             <span className="mini-tag">
                               <Heart
                                 size={11}
-                                style={{ marginRight: 4, verticalAlign: "-1px" }}
+                                style={{
+                                  marginRight: 4,
+                                  verticalAlign: "-1px",
+                                }}
                               />
                               {model.likes.toLocaleString()}
                             </span>
@@ -672,16 +965,20 @@ export function App(): React.ReactElement {
               </section>
             )}
 
-            {/* 3. AI News & Discussions */}
+            {/* Section 3: AI News & Discussions */}
             {(activeTab === "all" || activeTab === "news") && (
-              <section className="digest-section">
+              <section id="section-news" className="digest-section">
                 <div className="section-header">
                   <h2 className="section-title">
                     <Newspaper size={19} style={{ color: "var(--accent)" }} />
                     Community News &amp; Discussions
                   </h2>
-                  <span className="mono-tag" style={{ color: "var(--text-muted)" }}>
-                    Hacker News Algolia 24h Window
+                  <span
+                    className="mono-tag"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    Citations [N1–N{digest.briefing.news.length}] · Hacker News
+                    Algolia
                   </span>
                 </div>
 
@@ -691,12 +988,24 @@ export function App(): React.ReactElement {
                   </p>
                 ) : (
                   <div className="cards-grid">
-                    {filteredNews.map((story, idx) => (
-                      <article key={`${story.discussion_url}-${idx}`} className="item-card">
+                    {filteredNews.map((story) => (
+                      <article
+                        id={`cite-${story.citation_id}`}
+                        key={`${story.citation_id}-${story.discussion_url}`}
+                        className={`item-card ${
+                          highlightedCite === story.citation_id
+                            ? "cited-highlight"
+                            : ""
+                        }`}
+                      >
                         <div>
                           <div className="card-top-meta">
-                            <span>{story.source}</span>
-                            <span>{story.points} pts</span>
+                            <span className="card-cite-anchor">
+                              [{story.citation_id}]
+                            </span>
+                            <span>
+                              {story.source} · {story.points} pts
+                            </span>
                           </div>
                           <h3 className="card-title">
                             <a
@@ -739,16 +1048,20 @@ export function App(): React.ReactElement {
               </section>
             )}
 
-            {/* 4. Open-Source AI Repositories */}
+            {/* Section 4: Open-Source AI Repositories */}
             {(activeTab === "all" || activeTab === "repos") && (
-              <section className="digest-section">
+              <section id="section-repos" className="digest-section">
                 <div className="section-header">
                   <h2 className="section-title">
                     <GitFork size={19} style={{ color: "var(--accent)" }} />
                     Breakout Open-Source Repositories
                   </h2>
-                  <span className="mono-tag" style={{ color: "var(--text-muted)" }}>
-                    GitHub Search API
+                  <span
+                    className="mono-tag"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    Citations [R1–R{digest.briefing.repos.length}] · GitHub
+                    Search API
                   </span>
                 </div>
 
@@ -758,15 +1071,29 @@ export function App(): React.ReactElement {
                   </p>
                 ) : (
                   <div className="cards-grid">
-                    {filteredRepos.map((repo, idx) => (
-                      <article key={`${repo.url}-${idx}`} className="item-card">
+                    {filteredRepos.map((repo) => (
+                      <article
+                        id={`cite-${repo.citation_id}`}
+                        key={`${repo.citation_id}-${repo.url}`}
+                        className={`item-card ${
+                          highlightedCite === repo.citation_id
+                            ? "cited-highlight"
+                            : ""
+                        }`}
+                      >
                         <div>
                           <div className="card-top-meta">
-                            <span>{repo.language}</span>
+                            <span className="card-cite-anchor">
+                              [{repo.citation_id}]
+                            </span>
                             <span>
+                              {repo.language} ·{" "}
                               <Star
                                 size={12}
-                                style={{ marginRight: 3, verticalAlign: "-1px" }}
+                                style={{
+                                  marginRight: 3,
+                                  verticalAlign: "-1px",
+                                }}
                               />
                               {repo.stars.toLocaleString()}
                             </span>

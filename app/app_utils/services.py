@@ -12,11 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Process-wide ADK session/artifact services shared by every serving surface.
+"""Process-wide ADK session, memory, and artifact services shared across surfaces.
 
-Registered under ``shared://`` so the ADK web routes, the A2A path, and the
-reasoning_engine adapter share one instance: a session created on any surface
-is visible to the others.
+Registered under ``shared://`` so the ADK web routes, the A2A path, the FastAPI
+UI server, and the reasoning_engine adapter share persistent state:
+- Defaults to ADK's persistent ``SqliteSessionService`` locally/on Cloud Run,
+  automatically upgrading to ``VertexAiSessionService`` on Agent Runtime or
+  custom ``SESSION_SERVICE_URI`` (e.g. Cloud SQL Postgres).
+- Provides ``VertexAiMemoryBankService`` when ``GOOGLE_CLOUD_AGENT_ENGINE_ID``
+  is present, with ``InMemoryMemoryService`` fallback for local/Cloud Run dev.
 """
 
 from __future__ import annotations
@@ -28,6 +32,8 @@ from google.adk.artifacts import GcsArtifactService, InMemoryArtifactService
 from google.adk.cli.service_registry import get_service_registry
 from google.adk.cli.utils.service_factory import create_session_service_from_options
 
+from app.persistence import get_default_sqlite_path
+
 SESSION_SERVICE_URI = "shared://session"
 ARTIFACT_SERVICE_URI = "shared://artifact"
 
@@ -38,25 +44,45 @@ _AGENT_DIR = os.path.dirname(
 
 @functools.cache
 def get_session_service():
-    """Process-wide session service shared across every serving surface."""
+    """Process-wide persistent ADK session service shared across every serving surface."""
     if uri := os.environ.get("SESSION_SERVICE_URI"):
         return create_session_service_from_options(
             base_dir=_AGENT_DIR, session_service_uri=uri
         )
     if agent_engine_id := os.environ.get("GOOGLE_CLOUD_AGENT_ENGINE_ID"):
-        from google.adk.sessions.vertex_ai_session_service import VertexAiSessionService
+        from google.adk.sessions.vertex_ai_session_service import (
+            VertexAiSessionService,
+        )
 
         return VertexAiSessionService(
             project=os.environ.get("GOOGLE_CLOUD_PROJECT"),
-            # Runtime-injected agent-engine region, not GOOGLE_CLOUD_LOCATION
-            # (which agent.py pins to "global").
             location=os.environ.get("GOOGLE_CLOUD_AGENT_ENGINE_LOCATION")
             or os.environ.get("GOOGLE_CLOUD_LOCATION"),
             agent_engine_id=agent_engine_id,
         )
-    from google.adk.sessions.in_memory_session_service import InMemorySessionService
+    from google.adk.sessions.sqlite_session_service import SqliteSessionService
 
-    return InMemorySessionService()
+    sqlite_path = get_default_sqlite_path("adk_sessions.sqlite3")
+    return SqliteSessionService(db_path=sqlite_path)
+
+
+@functools.cache
+def get_memory_service():
+    """Process-wide ADK long-term memory service (Vertex AI Memory Bank or in-memory)."""
+    if agent_engine_id := os.environ.get("GOOGLE_CLOUD_AGENT_ENGINE_ID"):
+        from google.adk.memory.vertex_ai_memory_bank_service import (
+            VertexAiMemoryBankService,
+        )
+
+        return VertexAiMemoryBankService(
+            project=os.environ.get("GOOGLE_CLOUD_PROJECT"),
+            location=os.environ.get("GOOGLE_CLOUD_AGENT_ENGINE_LOCATION")
+            or os.environ.get("GOOGLE_CLOUD_LOCATION"),
+            agent_engine_id=agent_engine_id,
+        )
+    from google.adk.memory.in_memory_memory_service import InMemoryMemoryService
+
+    return InMemoryMemoryService()
 
 
 @functools.cache
